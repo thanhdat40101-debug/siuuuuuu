@@ -5,14 +5,14 @@ import re
 import threading
 import requests
 from flask import Flask
-from telebot import TeleBot
+from telebot import TeleBot, types
 
-# ==================== WEB SERVER GIẢ (GIỮ RENDER KHÔNG BỊ DISCONNECT) ====================
+# ==================== WEB SERVER GIẢ ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot HitClub MD5 đang chạy 24/7!"
+    return "Bot HitClub MD5 VIP đang chạy 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -22,20 +22,17 @@ def run_web():
 BOT_TOKEN = "8935712977:AAHiPMo3dq16NzUnq2reuUw_UD0s1sPvQYs"
 bot = TeleBot(BOT_TOKEN, threaded=True)
 
-USER_SETTINGS = {}
+# Danh sách lưu các Chat ID đã từng tương tác với Bot
+ACTIVE_CHATS = set()
 HISTORY_MD5 = []
 LAST_PHIEN_MD5 = None
 
 STATS_MD5 = {"win": 5358, "loss": 5341}
 
-# API DUY NHẤT VỪA ĐỌC LỊCH SỬ VỪA ĐỌC PHIÊN MỚI
-URL_RAILWAY_MD5 = "https://bottele-production-4be9.up.railway.app/api/history/md5"
+KWIN_KEY = "8167b2c16888dae174a454f493022e22242f35288df59f41"
+URL_KWIN_REALTIME = f"https://kwinstore.com/hitclub/md5/{KWIN_KEY}"
+URL_KWIN_HISTORY = f"https://kwinstore.com/hitclub/md5/history/{KWIN_KEY}"
 URL_PREDICT_TOMDAYY = "https://tool.tomdayy.site/dashboard.php?ajax_predict=1&source=hitclub_md5"
-
-def get_user_setting(chat_id):
-    if chat_id not in USER_SETTINGS:
-        USER_SETTINGS[chat_id] = {"auto_md5": True}
-    return USER_SETTINGS[chat_id]
 
 def fetch_api_data(url):
     headers = {
@@ -43,61 +40,64 @@ def fetch_api_data(url):
         "Accept": "*/*"
     }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             try:
                 return response.json()
             except:
                 return response.text
     except Exception as e:
-        print(f"⚠️ [API Call Fail] {url}: {e}")
+        print(f"❌ Lỗi API ({url}): {e}")
     return None
 
 def fetch_prediction_tomdayy():
-    raw_response = fetch_api_data(URL_PREDICT_TOMDAYY)
-    
-    dudoan = "Tài"
-    confidence = 55
-    analysis = "Mã MD5 chưa cập nhật từ API - Dùng xác suất mặc định"
+    """Lấy dự đoán Tomdayy với Timeout 3s để tránh treo Bot"""
+    try:
+        raw_response = fetch_api_data(URL_PREDICT_TOMDAYY)
+        dudoan = "Tài"
+        confidence = 55
+        analysis = "Mã MD5 chưa cập nhật từ API - Dùng xác suất mặc định"
 
-    if not raw_response:
-        return dudoan, confidence, analysis
+        if not raw_response:
+            return dudoan, confidence, analysis
 
-    if isinstance(raw_response, str):
-        json_match = re.search(r'\{.*\}', raw_response)
-        if json_match:
-            try:
-                raw_response = json.loads(json_match.group(0))
-            except Exception:
-                pass
+        if isinstance(raw_response, str):
+            json_match = re.search(r'\{.*\}', raw_response)
+            if json_match:
+                try:
+                    raw_response = json.loads(json_match.group(0))
+                except:
+                    pass
 
-    if isinstance(raw_response, dict):
-        pred_raw = str(raw_response.get("prediction", raw_response.get("predict", raw_response.get("dudoan", "TÀI")))).upper()
-        dudoan = "Tài" if ("TÀI" in pred_raw or "TAI" in pred_raw) else "Xỉu"
-        
-        conf_raw = str(raw_response.get("confidence", raw_response.get("rate", "55"))).replace("%", "")
-        try:
-            confidence = int(float(conf_raw))
-        except:
-            confidence = 55
+        if isinstance(raw_response, dict):
+            pred_raw = str(raw_response.get("prediction", raw_response.get("predict", raw_response.get("dudoan", "TÀI")))).upper()
+            dudoan = "Tài" if ("TÀI" in pred_raw or "TAI" in pred_raw) else "Xỉu"
             
-        analysis = raw_response.get("analysis", raw_response.get("lydo", analysis))
+            conf_raw = str(raw_response.get("confidence", raw_response.get("rate", "55"))).replace("%", "")
+            try:
+                confidence = int(float(conf_raw))
+            except:
+                confidence = 55
+                
+            analysis = raw_response.get("analysis", raw_response.get("lydo", analysis))
 
-    return dudoan, confidence, analysis
+        return dudoan, confidence, analysis
+    except:
+        return "Tài", 55, "Hệ thống phân tích tự động"
 
 def parse_dice_and_result(item):
     if not isinstance(item, dict):
-        return "0", "Chưa cập nhật", "Chưa có", "Chưa cập nhật"
+        return "0", "Chưa cập nhật", "Chưa có", "Chưa  cập  nhật"
 
     phien = "0"
-    for p_key in ["phien", "phien_cu", "session", "sid", "id", "phien_id", "session_id"]:
+    for p_key in ["phien", "phien_cu", "session", "sid", "id", "phien_id"]:
         if p_key in item and item[p_key] is not None:
             digits = re.sub(r'\D', '', str(item[p_key]))
             if digits:
                 phien = digits
                 break
 
-    md5_code = item.get("md5", item.get("hash", "Chưa cập nhật"))
+    md5_code = item.get("md5", item.get("hash", "Chưa  cập  nhật"))
 
     d1 = d2 = d3 = None
     for d_key in ["dice", "dices", "xucxac", "xuc_xac", "results"]:
@@ -137,42 +137,32 @@ def parse_dice_and_result(item):
 
     return phien, dice_str, actual, md5_code
 
-def fetch_latest_from_railway():
-    """Lấy danh sách từ API Railway và tách phiên mới nhất"""
-    hist_json = fetch_api_data(URL_RAILWAY_MD5)
-    if not hist_json:
-        return None, []
-
-    raw_list = []
-    if isinstance(hist_json, list):
-        raw_list = hist_json
-    elif isinstance(hist_json, dict):
-        for key in ["data", "result", "history", "items", "list"]:
-            if key in hist_json and isinstance(hist_json[key], list):
-                raw_list = hist_json[key]
+def parse_kwin_item(data):
+    item = data
+    if isinstance(item, dict):
+        for key in ["data", "result", "list", "items"]:
+            if key in item and isinstance(item[key], (list, dict)):
+                item = item[key]
                 break
 
-    if not raw_list:
-        return None, []
+    if isinstance(item, list) and len(item) > 0:
+        item = item[0]
 
-    # Phân tích từng phần tử
-    parsed_items = []
-    for item in raw_list:
-        phien, dice_str, actual, md5_code = parse_dice_and_result(item)
-        if phien != "0":
-            parsed_items.append({
-                "phien": phien,
-                "dice_str": dice_str,
-                "actual": actual,
-                "md5": md5_code
-            })
+    if not isinstance(item, dict):
+        return None
 
-    if not parsed_items:
-        return None, []
+    phien, dice_str, actual, md5_code = parse_dice_and_result(item)
+    dudoan, confidence, analysis = fetch_prediction_tomdayy()
 
-    # Phần tử đầu tiên chính là phiên mới nhất
-    latest_item = parsed_items[0]
-    return latest_item, parsed_items
+    return {
+        "phien": phien,
+        "dice_str": dice_str,
+        "actual": actual,
+        "md5": md5_code,
+        "dudoan": dudoan,
+        "confidence": confidence,
+        "analysis": analysis
+    }
 
 def generate_cau_string():
     if not HISTORY_MD5:
@@ -183,21 +173,20 @@ def generate_cau_string():
         cau_icons.append("🔴" if "TÀI" in res else "🔵")
     return "".join(cau_icons)
 
-def format_beauty_message(latest_item):
-    if not latest_item or latest_item["phien"] == "0":
+def format_beauty_message(kwin_json):
+    parsed = parse_kwin_item(kwin_json)
+    if not parsed or parsed["phien"] == "0":
         return None
 
-    prev_phien = latest_item["phien"]
+    prev_phien = parsed["phien"]
     try:
         curr_phien = str(int(prev_phien) + 1)
     except:
         curr_phien = "2582651"
 
-    actual_result = latest_item["actual"]
-    dice_str = latest_item["dice_str"]
-    md5_str = latest_item.get("md5", "Chưa cập nhật")
-
-    dudoan, confidence, analysis = fetch_prediction_tomdayy()
+    actual_result = parsed["actual"]
+    dice_str = parsed["dice_str"]
+    md5_str = parsed.get("md5", "Chưa  cập  nhật")
 
     last_status = "THẮNG"
     if len(HISTORY_MD5) > 1:
@@ -217,8 +206,11 @@ def format_beauty_message(latest_item):
         f"╰━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
     )
 
+    dudoan = parsed["dudoan"]
+    conf_num = parsed["confidence"]
+    analysis = parsed["analysis"]
     win_icon = "🔴" if dudoan == "Tài" else "🔵"
-    other_conf = round(100 - confidence, 1)
+    other_conf = round(100 - conf_num, 1)
 
     wins = STATS_MD5["win"]
     losses = STATS_MD5["loss"]
@@ -232,8 +224,8 @@ def format_beauty_message(latest_item):
         f"╭━━━━ 🤖 DỰ ĐOÁN THÔNG MINH 🤖 ━━━━╮\n"
         f"1️⃣2️⃣ Phiên kế tiếp: {curr_phien}\n\n"
         f"🎯 Dự đoán: {dudoan} {win_icon}\n"
-        f"📊 Độ tin cậy: {confidence}%\n"
-        f"⚖️ Trọng số MD5: Tài {confidence}% · Xỉu {other_conf}%\n"
+        f"📊 Độ tin cậy: {conf_num}%\n"
+        f"⚖️ Trọng số MD5: Tài {conf_num}% · Xỉu {other_conf}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💡 Cơ sở phân tích:\n"
         f"• {analysis}\n\n"
@@ -243,64 +235,89 @@ def format_beauty_message(latest_item):
     )
     return msg
 
-# ==================== LUỒNG TỰ ĐỘNG CHẠY BẤT TẬN (24/7) ====================
+def load_initial_history():
+    """Tải 10 phiên lịch sử đầu tiên từ API"""
+    global HISTORY_MD5
+    hist_json = fetch_api_data(URL_KWIN_HISTORY)
+    if hist_json:
+        raw_list = hist_json if isinstance(hist_json, list) else hist_json.get("data", hist_json.get("result", []))
+        if isinstance(raw_list, list):
+            temp_history = []
+            for item in raw_list[:15]:
+                phien, dice_str, actual, md5_code = parse_dice_and_result(item)
+                if phien != "0":
+                    temp_history.append({
+                        "phien": phien,
+                        "dice_str": dice_str,
+                        "actual": actual,
+                        "dudoan": "Tài",
+                        "status_icon": "🟢",
+                        "status_text": "THẮNG"
+                    })
+            if temp_history:
+                HISTORY_MD5 = list(reversed(temp_history))
+
+# ==================== LUỒNG TỰ ĐỘNG CHẠY ====================
 def auto_checker():
-    global LAST_PHIEN_MD5, HISTORY_MD5
+    global LAST_PHIEN_MD5
+    load_initial_history()
     
     while True:
         try:
-            latest_item, all_items = fetch_latest_from_railway()
+            api_json = fetch_api_data(URL_KWIN_REALTIME)
+            parsed = parse_kwin_item(api_json)
             
-            if all_items:
-                # Đồng bộ danh sách lịch sử theo thứ tự tăng dần thời gian
-                temp_hist = []
-                for it in all_items[:20][::-1]:
-                    dudoan_tmp, _, _ = fetch_prediction_tomdayy()
-                    status_icon = "🟢" if dudoan_tmp.upper() == it["actual"].upper() else "🔴"
-                    status_text = "THẮNG" if dudoan_tmp.upper() == it["actual"].upper() else "THUA"
-                    it["dudoan"] = dudoan_tmp
-                    it["status_icon"] = status_icon
-                    it["status_text"] = status_text
-                    temp_hist.append(it)
-                HISTORY_MD5 = temp_hist
-
-            if latest_item and latest_item["phien"] != "0":
-                curr_phien = latest_item["phien"]
+            if parsed and parsed["phien"] != "0" and parsed["actual"] != "Chưa có":
+                curr_phien = parsed["phien"]
                 
                 if curr_phien != LAST_PHIEN_MD5:
                     LAST_PHIEN_MD5 = curr_phien
 
-                    msg = format_beauty_message(latest_item)
+                    status_icon = "🟢" if parsed["dudoan"].upper() == parsed["actual"].upper() else "🔴"
+                    status_text = "THẮNG" if parsed["dudoan"].upper() == parsed["actual"].upper() else "THUA"
+
+                    parsed["status_icon"] = status_icon
+                    parsed["status_text"] = status_text
+                    
+                    HISTORY_MD5.append(parsed)
+                    if len(HISTORY_MD5) > 100:
+                        HISTORY_MD5.pop(0)
+
+                    msg = format_beauty_message(api_json)
                     if msg:
-                        for chat_id in list(USER_SETTINGS.keys()):
-                            if USER_SETTINGS[chat_id].get("auto_md5", True):
-                                try:
-                                    bot.send_message(chat_id, msg)
-                                except Exception as e:
-                                    print(f"⚠️ Lỗi gửi tin tới {chat_id}: {e}")
+                        for chat_id in list(ACTIVE_CHATS):
+                            try:
+                                bot.send_message(chat_id, msg)
+                            except Exception as e:
+                                print(f"Lỗi gửi tin tới {chat_id}: {e}")
         except Exception as e:
-            print(f"🚨 Auto Checker gặp lỗi: {e}")
+            print(f"❌ Lỗi Auto Checker: {e}")
         
-        time.sleep(3)
+        time.sleep(4)
 
 # ==================== LỆNH BOT TELEGRAM ====================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     chat_id = message.chat.id
-    get_user_setting(chat_id)
+    ACTIVE_CHATS.add(chat_id)  # Đăng ký Chat ID ngay lập tức
     
-    latest_item, _ = fetch_latest_from_railway()
-    msg = format_beauty_message(latest_item)
+    bot.send_message(chat_id, "⏳ **Đang kết nối API sảnh HitClub MD5...**", parse_mode="Markdown")
     
-    if not msg:
-        msg = "🤖 **BOT TRA CỨU HITCLUB MD5 AUTOMATIC**\n\nBot đã sẵn sàng và đang chạy bằng API Railway 24/7!"
-        
-    bot.send_message(chat_id, msg)
+    api_json = fetch_api_data(URL_KWIN_REALTIME)
+    msg = format_beauty_message(api_json)
+    
+    if msg:
+        bot.send_message(chat_id, msg)
+    else:
+        bot.send_message(chat_id, "⚠️ Máy chủ Kwinstore đang phản hồi chậm. Bot sẽ tự động gửi khi có kết quả phiên mới!")
 
 @bot.message_handler(commands=['11', 'thongke'])
 def send_thongke_command(message):
+    chat_id = message.chat.id
+    ACTIVE_CHATS.add(chat_id)
+    
     if not HISTORY_MD5:
-        _, _ = fetch_latest_from_railway()
+        load_initial_history()
         
     sub_list = HISTORY_MD5[-10:]
     wins = sum(1 for item in sub_list if item.get('status_text') == 'THẮNG')
@@ -318,15 +335,13 @@ def send_thongke_command(message):
     
     bot.reply_to(message, msg, parse_mode="Markdown")
 
-# ==================== KHỞI CHẠY BOT LIÊN TỤC VỚI AUTO-RECONNECT ====================
 def run_bot():
-    print("🚀 Bot HitClub MD5 (Railway API) đã khởi động liên tục 24/7...")
+    print("🚀 Bot HitClub MD5 VIP đã khởi động thành công...")
     while True:
         try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+            bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except Exception as e:
-            print(f"🔄 Mất kết nối Telegram, thử lại sau 5s: {e}")
-            time.sleep(5)
+            time.sleep(3)
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
