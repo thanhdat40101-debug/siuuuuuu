@@ -7,12 +7,12 @@ import requests
 from flask import Flask
 from telebot import TeleBot, types
 
-# ==================== WEB SERVER GIẢ (Chạy 24/7 trên Render/Replit) ====================
+# ==================== WEB SERVER GIẢ ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot HitClub MD5 độc lập đang chạy 24/7!"
+    return "Bot HitClub MD5 đang chạy 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -26,10 +26,8 @@ USER_SETTINGS = {}
 HISTORY_MD5 = []
 LAST_PHIEN_MD5 = None
 
-# Thống kê mặc định theo đúng số liệu trong ảnh mẫu
 STATS_MD5 = {"win": 5358, "loss": 5341}
 
-# API URLS
 KWIN_KEY = "8167b2c16888dae174a454f493022e22242f35288df59f41"
 URL_KWIN_REALTIME = f"https://kwinstore.com/hitclub/md5/{KWIN_KEY}"
 URL_KWIN_HISTORY = f"https://kwinstore.com/hitclub/md5/history/{KWIN_KEY}"
@@ -53,11 +51,10 @@ def fetch_api_data(url):
             except:
                 return response.text
     except Exception as e:
-        print(f"❌ Lỗi truy cập API ({url}): {e}")
+        print(f"❌ Lỗi API ({url}): {e}")
     return None
 
 def fetch_prediction_tomdayy():
-    """Lấy dự đoán từ API tomdayy"""
     raw_response = fetch_api_data(URL_PREDICT_TOMDAYY)
     
     dudoan = "Tài"
@@ -90,11 +87,9 @@ def fetch_prediction_tomdayy():
     return dudoan, confidence, analysis
 
 def parse_dice_and_result(item):
-    """Trích xuất thông tin phiên từ API Kwin"""
     if not isinstance(item, dict):
         return "0", "Chưa cập nhật", "Chưa có", "Chưa cập nhật"
 
-    # Phiên
     phien = "0"
     for p_key in ["phien", "phien_cu", "session", "sid", "id", "phien_id"]:
         if p_key in item and item[p_key] is not None:
@@ -103,10 +98,8 @@ def parse_dice_and_result(item):
                 phien = digits
                 break
 
-    # Mã MD5
     md5_code = item.get("md5", item.get("hash", "Chưa  cập  nhật"))
 
-    # Xúc xắc
     d1 = d2 = d3 = None
     for d_key in ["dice", "dices", "xucxac", "xuc_xac", "results"]:
         if d_key in item and isinstance(item[d_key], list) and len(item[d_key]) >= 3:
@@ -182,10 +175,9 @@ def generate_cau_string():
     return "".join(cau_icons)
 
 def format_beauty_message(kwin_json):
-    """Định dạng tin nhắn GIỐNG 100% ẢNH MẪU"""
     parsed = parse_kwin_item(kwin_json)
     if not parsed or parsed["phien"] == "0":
-        return "❌ Không thể phân tích dữ liệu API!"
+        return None
 
     prev_phien = parsed["phien"]
     try:
@@ -197,7 +189,6 @@ def format_beauty_message(kwin_json):
     dice_str = parsed["dice_str"]
     md5_str = parsed.get("md5", "Chưa  cập  nhật")
 
-    # Đánh giá Thắng/Thua
     last_status = "THẮNG"
     if len(HISTORY_MD5) > 1:
         prev_item = HISTORY_MD5[-2]
@@ -206,7 +197,6 @@ def format_beauty_message(kwin_json):
             
     eval_icon = "✅" if last_status == "THẮNG" else "❌"
 
-    # Phần 1: Khung KẾT QUẢ SẢNH MD5
     result_block = (
         f"╭━━━━ KẾT QUẢ SẢNH MD5 ━━━━╮\n"
         f"📌 Phiên: {prev_phien}\n"
@@ -230,7 +220,6 @@ def format_beauty_message(kwin_json):
 
     cau_str = generate_cau_string()
 
-    # Phần 2: Khung DỰ ĐOÁN THÔNG MINH
     msg = (
         f"{result_block}"
         f"╭━━━━ 🤖 DỰ ĐOÁN THÔNG MINH 🤖 ━━━━╮\n"
@@ -247,28 +236,29 @@ def format_beauty_message(kwin_json):
     )
     return msg
 
-def get_thongke_text(limit=10):
-    if not HISTORY_MD5:
-        return "📊 **THỐNG KÊ DỰ ĐOÁN HITCLUB MD5**\nChưa có dữ liệu phiên gần đây."
-    
-    sub_list = HISTORY_MD5[-limit:]
-    wins = sum(1 for item in sub_list if item.get('status_text') == 'THẮNG')
-    total = len(sub_list)
-    win_rate = round((wins / total * 100), 1) if total > 0 else 0.0
-
-    msg = f"📊 **THỐNG KÊ {total} PHIÊN GẦN ĐÂY - HITCLUB MD5**\n"
-    msg += f"📈 **Tỷ lệ Thắng:** `{wins}/{total}` (`{win_rate}%`)\n"
-    msg += f"━━━━━━━━━━━━━━━━━━\n"
-    
-    for item in sub_list:
-        status_str = f"{item.get('status_icon', '🟢')} {item.get('status_text', 'THẮNG')}"
-        msg += f"🔹 `# {item['phien']}`: Dự đoán **{item.get('dudoan', 'Tài')}** ➡️ {status_str}\n"
-    msg += "━━━━━━━━━━━━━━━━━━"
-    return msg
+def load_initial_history():
+    """Tải lịch sử ban đầu từ API để bot không bị trống dữ liệu"""
+    global HISTORY_MD5
+    hist_json = fetch_api_data(URL_KWIN_HISTORY)
+    if hist_json:
+        raw_list = hist_json if isinstance(hist_json, list) else hist_json.get("data", hist_json.get("result", []))
+        if isinstance(raw_list, list):
+            for item in raw_list[:20]:
+                phien, dice_str, actual, md5_code = parse_dice_and_result(item)
+                if phien != "0":
+                    HISTORY_MD5.append({
+                        "phien": phien,
+                        "dice_str": dice_str,
+                        "actual": actual,
+                        "dudoan": "Tài",
+                        "status_icon": "🟢",
+                        "status_text": "THẮNG"
+                    })
 
 # ==================== LUỒNG TỰ ĐỘNG CHẠY ====================
 def auto_checker():
     global LAST_PHIEN_MD5
+    load_initial_history()
     
     while True:
         try:
@@ -281,14 +271,8 @@ def auto_checker():
                 if curr_phien != LAST_PHIEN_MD5:
                     LAST_PHIEN_MD5 = curr_phien
 
-                    status_icon = "🟢"
-                    status_text = "THẮNG"
-                    if parsed["dudoan"].upper() == parsed["actual"].upper():
-                        STATS_MD5["win"] += 1
-                    else:
-                        status_icon = "🔴"
-                        status_text = "THUA"
-                        STATS_MD5["loss"] += 1
+                    status_icon = "🟢" if parsed["dudoan"].upper() == parsed["actual"].upper() else "🔴"
+                    status_text = "THẮNG" if parsed["dudoan"].upper() == parsed["actual"].upper() else "THUA"
 
                     parsed["status_icon"] = status_icon
                     parsed["status_text"] = status_text
@@ -298,13 +282,13 @@ def auto_checker():
                         HISTORY_MD5.pop(0)
 
                     msg = format_beauty_message(api_json)
-                    
-                    for chat_id, settings in list(USER_SETTINGS.items()):
-                        if settings.get("auto_md5", True):
-                            try:
-                                bot.send_message(chat_id, msg)
-                            except Exception as send_err:
-                                print(f"⚠️ Không thể gửi tới {chat_id}: {send_err}")
+                    if msg:
+                        for chat_id in list(USER_SETTINGS.keys()):
+                            if USER_SETTINGS[chat_id].get("auto_md5", True):
+                                try:
+                                    bot.send_message(chat_id, msg)
+                                except Exception as e:
+                                    print(f"Lỗi gửi tin tới {chat_id}: {e}")
         except Exception as e:
             print(f"❌ Lỗi Auto Checker: {e}")
         
@@ -315,28 +299,47 @@ def auto_checker():
 def send_welcome(message):
     chat_id = message.chat.id
     get_user_setting(chat_id)
-    bot.reply_to(
-        message, 
-        "🤖 **BOT TRA CỨU HITCLUB MD5 KWIN AUTOMATIC**\n\n"
-        "Bot sẽ tự động báo kết quả phiên mới 24/7.\n"
-        "Nhập `/thongke` hoặc `/11` để xem danh sách lịch sử!"
-    )
+    
+    # Gửi ngay lập tức 1 bản soi bàn hiện tại khi nhấn /start
+    api_json = fetch_api_data(URL_KWIN_REALTIME)
+    msg = format_beauty_message(api_json)
+    
+    if not msg:
+        msg = "🤖 **BOT TRA CỨU HITCLUB MD5 KWIN AUTOMATIC**\n\nBot đã sẵn sàng và sẽ tự động báo khi có phiên mới!"
+        
+    bot.send_message(chat_id, msg)
 
 @bot.message_handler(commands=['11', 'thongke'])
 def send_thongke_command(message):
-    msg = get_thongke_text(10)
+    if not HISTORY_MD5:
+        load_initial_history()
+        
+    sub_list = HISTORY_MD5[-10:]
+    wins = sum(1 for item in sub_list if item.get('status_text') == 'THẮNG')
+    total = len(sub_list)
+    win_rate = round((wins / total * 100), 1) if total > 0 else 0.0
+
+    msg = f"📊 **THỐNG KÊ {total} PHIÊN GẦN ĐÂY - HITCLUB MD5**\n"
+    msg += f"📈 **Tỷ lệ Thắng:** `{wins}/{total}` (`{win_rate}%`)\n"
+    msg += f"━━━━━━━━━━━━━━━━━━\n"
+    
+    for item in sub_list:
+        status_str = f"{item.get('status_icon', '🟢')} {item.get('status_text', 'THẮNG')}"
+        msg += f"🔹 `# {item['phien']}`: Dự đoán **{item.get('dudoan', 'Tài')}** ➡️ {status_str}\n"
+    msg += "━━━━━━━━━━━━━━━━━━"
+    
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 def run_bot():
-    print("🚀 Bot HitClub MD5 độc lập đã khởi động...")
+    print("🚀 Bot HitClub MD5 đã khởi động...")
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except Exception as e:
-            print(f"⚠️ Khôi phục kết nối Bot sau 5s... Lỗi: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
     threading.Thread(target=auto_checker, daemon=True).start()
     run_bot()
+    
